@@ -1,28 +1,112 @@
 import * as d3 from "d3";
-import { useState, useEffect, useRef } from "react";
+import { useEffect, useRef, useState } from "react";
 
 const colorScale = d3.scaleOrdinal(d3.schemeCategory10);
-const graphWidth = 1200;
-const graphHeight = 400;
-const minGraphHeight = 300;
+const graphHeight = 340;
+const fallbackGraphWidth = 720;
+const minInnerGraphWidth = 220;
 
-const scheduleGraphs = ({ schedules, setErrorMessage }) => {
+function ScheduleVisualization({ schedules }) {
   const svgRefs = useRef({});
-  const [windowSize, setWindowSize] = useState({
-    width: window.innerWidth,
-    height: window.innerHeight,
-  });
+  const chartShellRefs = useRef({});
+  const tooltipRef = useRef(null);
+  const [chartWidths, setChartWidths] = useState({});
 
   useEffect(() => {
+    tooltipRef.current = d3
+      .select("body")
+      .selectAll(".schedule-tooltip")
+      .data([null])
+      .join("div")
+      .attr("class", "schedule-tooltip")
+      .style("opacity", 0)
+      .style("position", "absolute")
+      .style("pointer-events", "none")
+      .style("z-index", 100)
+      .style("background", "rgba(5, 12, 16, 0.92)")
+      .style("border", "1px solid rgba(255, 255, 255, 0.12)")
+      .style("border-radius", "14px")
+      .style("padding", "10px 12px")
+      .style("color", "#f4efe6")
+      .style("font-size", "0.88rem")
+      .style("line-height", "1.5")
+      .style("box-shadow", "0 18px 48px rgba(0, 0, 0, 0.25)");
+
+    return () => {
+      d3.select("body").selectAll(".schedule-tooltip").remove();
+    };
+  }, []);
+
+  useEffect(() => {
+    if (!schedules) return undefined;
+
+    const scheduleKeys = Object.keys(schedules);
+    const measureWidths = () => {
+      setChartWidths((previousWidths) => {
+        let hasChanged = false;
+        const nextWidths = { ...previousWidths };
+
+        scheduleKeys.forEach((scheduleKey) => {
+          const shellNode = chartShellRefs.current[scheduleKey];
+          if (!shellNode) return;
+
+          const nextWidth = Math.round(shellNode.getBoundingClientRect().width);
+          if (nextWidth > 0 && previousWidths[scheduleKey] !== nextWidth) {
+            nextWidths[scheduleKey] = nextWidth;
+            hasChanged = true;
+          }
+        });
+
+        return hasChanged ? nextWidths : previousWidths;
+      });
+    };
+
+    measureWidths();
+
+    if (typeof ResizeObserver === "undefined") {
+      window.addEventListener("resize", measureWidths);
+      return () => {
+        window.removeEventListener("resize", measureWidths);
+      };
+    }
+
+    const resizeObserver = new ResizeObserver(() => {
+      measureWidths();
+    });
+
+    scheduleKeys.forEach((scheduleKey) => {
+      const shellNode = chartShellRefs.current[scheduleKey];
+      if (shellNode) {
+        resizeObserver.observe(shellNode);
+      }
+    });
+
+    return () => {
+      resizeObserver.disconnect();
+    };
+  }, [schedules]);
+
+  useEffect(() => {
+    if (!schedules) return;
+
     Object.keys(schedules).forEach((scheduleKey) => {
       const svg = d3.select(svgRefs.current[scheduleKey]);
       const svgNode = svg.node();
-      const boundingRect = svgNode.getBoundingClientRect();
 
-      const margin = { top: 80, right: 10, bottom: 50, left: 50 }; // Increased top margin for algorithm name
-      const width = boundingRect.width - margin.left - margin.right;
-      const height = boundingRect.height - margin.top - margin.bottom;
+      if (!svgNode) {
+        return;
+      }
 
+      const margin = { top: 74, right: 16, bottom: 52, left: 58 };
+      const chartWidth = chartWidths[scheduleKey] ?? fallbackGraphWidth;
+      const width = Math.max(
+        minInnerGraphWidth,
+        chartWidth - margin.left - margin.right,
+      );
+      const height = graphHeight - margin.top - margin.bottom;
+
+      svg.attr("width", chartWidth);
+      svg.attr("height", graphHeight);
       svg.selectAll("*").remove();
 
       const g = svg
@@ -30,23 +114,10 @@ const scheduleGraphs = ({ schedules, setErrorMessage }) => {
         .attr("transform", `translate(${margin.left}, ${margin.top})`);
 
       const algorithmName = schedules[scheduleKey].name;
-      const nodes = Array.from(
-        new Set(schedules[scheduleKey].schedule.map((job) => job.node_id)),
-      );
-      const endTime = d3.max(
-        schedules[scheduleKey].schedule.map((job) => job.end_time),
-      );
-      const startTime = d3.min(
-        schedules[scheduleKey].schedule.map((job) => job.start_time),
-      ); // Calculate the minimum start_time
-      // set the error messages for missed deadlines
-
-      if (schedules[scheduleKey].missed_deadlines?.length > 0) {
-        setErrorMessage((prev) => [
-          ...prev,
-          `${algorithmName}: ${schedules[scheduleKey].missed_deadlines.join(",")} Missed Deadline`,
-        ]);
-      }
+      const schedule = schedules[scheduleKey].schedule;
+      const nodes = Array.from(new Set(schedule.map((job) => job.node_id)));
+      const endTime = d3.max(schedule.map((job) => job.end_time));
+      const startTime = d3.min(schedule.map((job) => job.start_time));
 
       const xScale = d3
         .scaleLinear()
@@ -57,60 +128,43 @@ const scheduleGraphs = ({ schedules, setErrorMessage }) => {
         .scaleBand()
         .domain(nodes)
         .range([height, 0])
-        .padding(0.1);
+        .padding(0.18);
 
-      // Add the x-axis and y-axis
       g.append("g")
         .attr("transform", `translate(0, ${height})`)
-        .call(d3.axisBottom(xScale))
-        .style("color", "#dfe6e9")
-        .style("font-size", "0.8rem");
+        .call(d3.axisBottom(xScale).ticks(Math.max(4, width / 120)))
+        .style("color", "#d2dee5")
+        .style("font-size", "0.76rem");
 
       g.append("g")
         .call(d3.axisLeft(yScale))
-        .style("color", "#dfe6e9")
-        .style("font-size", "0.8rem");
+        .style("color", "#d2dee5")
+        .style("font-size", "0.76rem");
 
-      // X-axis label
       g.append("text")
         .attr("x", width / 2)
-        .attr("y", height + margin.bottom / 1.5)
+        .attr("y", height + margin.bottom / 1.45)
         .attr("text-anchor", "middle")
         .text("Time")
-        .style("fill", "#dfe6e9");
+        .style("fill", "#d2dee5");
 
-      // Y-axis label
       g.append("text")
         .attr("transform", "rotate(-90)")
-        .attr("y", -margin.left + 15)
+        .attr("y", -margin.left + 18)
         .attr("x", -height / 2)
         .attr("dy", "1em")
         .style("text-anchor", "middle")
         .text("Nodes")
-        .style("fill", "#dfe6e9");
+        .style("fill", "#d2dee5");
 
       g.append("text")
         .attr("x", width / 2)
         .attr("y", -margin.top / 2)
         .attr("text-anchor", "middle")
         .text(algorithmName)
-        .style("fill", "#00b894")
-        .style("font-size", "1.2rem")
-        .style("font-weight", "bold");
-
-      const schedule = schedules[scheduleKey].schedule;
-      // Create a tooltip to show the task details
-      const tooltip = d3
-        .select("body")
-        .append("div")
-        .attr("class", "tooltip")
-        .style("opacity", 0)
-        .style("position", "absolute")
-        .style("background-color", "black")
-        .style("padding", "10px")
-        .style("border-radius", "5px")
-        .style("font-size", "1.2rem")
-        .style("color", "white");
+        .style("fill", "#36c690")
+        .style("font-size", "1.1rem")
+        .style("font-weight", "700");
 
       g.selectAll(".bar")
         .data(schedule)
@@ -121,18 +175,28 @@ const scheduleGraphs = ({ schedules, setErrorMessage }) => {
         .attr("y", (d) => yScale(d.node_id))
         .attr("width", (d) => xScale(d.end_time) - xScale(d.start_time))
         .attr("height", yScale.bandwidth())
+        .attr("rx", 8)
+        .attr("ry", 8)
         .style("fill", (d) => colorScale(d.task_id))
+        .style("stroke", "rgba(255, 255, 255, 0.14)")
+        .style("stroke-width", 1)
         .on("mouseover", (event, d) => {
-          tooltip.transition().duration(10).style("opacity", 0.9);
-          tooltip
+          tooltipRef.current
+            .interrupt()
+            .style("opacity", 1)
             .html(
-              `Task: ${d.task_id} <br/>Start: ${d.start_time}<br/>End: ${d.end_time}`,
+              `Task ${d.task_id}<br/>Start: ${d.start_time}<br/>End: ${d.end_time}`,
             )
-            .style("left", event.pageX + "px")
-            .style("top", event.pageY - 28 + "px");
+            .style("left", `${event.pageX + 12}px`)
+            .style("top", `${event.pageY - 24}px`);
+        })
+        .on("mousemove", (event) => {
+          tooltipRef.current
+            .style("left", `${event.pageX + 12}px`)
+            .style("top", `${event.pageY - 24}px`);
         })
         .on("mouseout", () => {
-          tooltip.transition().duration(10).style("opacity", 0);
+          tooltipRef.current.interrupt().style("opacity", 0);
         });
 
       g.selectAll(".text")
@@ -143,45 +207,41 @@ const scheduleGraphs = ({ schedules, setErrorMessage }) => {
         .attr("y", (d) => yScale(d.node_id) + yScale.bandwidth() / 2)
         .attr("dy", "0.35em")
         .text((d) => `${d.task_id}`)
-        .style("fill", "#dfe6e9")
-        .style("font-size", "1rem")
-        .style("font-weight", "bold");
+        .style("fill", "#f4efe6")
+        .style("font-size", "0.82rem")
+        .style("font-weight", "700");
     });
+  }, [schedules, chartWidths]);
 
-    const handleResize = () => {
-      setWindowSize({
-        width: window.innerWidth,
-        height: window.innerHeight,
-      });
-    };
-
-    window.addEventListener("resize", handleResize);
-
-    return () => {
-      window.removeEventListener("resize", handleResize);
-    };
-  }, [schedules, windowSize.width]);
-
-  if (!schedules) return;
+  if (!schedules) return null;
 
   return (
-    <>
-      {Object.entries(schedules).map(([schedule]) => (
-        <svg
-          key={schedule}
-          id={schedule}
-          ref={(el) => (svgRefs.current[schedule] = el)}
-          width="100%"
-          style={{
-            maxWidth: graphWidth,
-            maxHeight: graphHeight,
-            minHeight: minGraphHeight,
-            aspectRatio: "16/9",
-          }}
-        ></svg>
-      ))}
-    </>
-  );
-};
+    <div className="schedule-data">
+      {Object.entries(schedules).map(([schedule]) => {
+        const chartWidth = chartWidths[schedule] ?? fallbackGraphWidth;
 
-export default scheduleGraphs;
+        return (
+          <div
+            key={schedule}
+            className="schedule-chart-shell"
+            ref={(element) => (chartShellRefs.current[schedule] = element)}
+          >
+            <svg
+              id={schedule}
+              ref={(element) => (svgRefs.current[schedule] = element)}
+              className="schedule-chart"
+              width={chartWidth}
+              height={graphHeight}
+              style={{
+                width: chartWidth,
+                height: graphHeight,
+              }}
+            ></svg>
+          </div>
+        );
+      })}
+    </div>
+  );
+}
+
+export default ScheduleVisualization;

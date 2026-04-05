@@ -1,264 +1,203 @@
-import React, { useEffect, useRef } from 'react';
-import * as d3 from 'd3';
-import dagre from 'dagre';
+import React, { useEffect, useRef } from "react";
+import * as d3 from "d3";
+import dagre from "dagre";
 
+const legendData = [
+  { type: "Compute", color: "#39c994" },
+  { type: "Router", color: "#f09b48" },
+  { type: "Sensor", color: "#579ff0" },
+  { type: "Actuator", color: "#ff7f63" },
+];
 
-const SVGPlatformModel = ({ graph, setGraph, deleteMode, highlightNode, setHighlightedNode, highlightedEdge, setHighlightedEdge, selectedSVG }) => {
+const SVGPlatformModel = ({
+  graph,
+  highlightNode,
+  highlightedEdge,
+  onNodeSelect,
+  onEdgeSelect,
+}) => {
   const svgRef = useRef();
   const nodeRadius = 5;
-  const svgClass = selectedSVG === "PlatformModel" ? 'active' : 'inactive';
-
-  const legendData = [
-    { type: 'Compute', color: '#00b894' },  // Assuming default fill is white
-    { type: 'Router', color: '#e67e22' },   // Assuming default fill is black
-    { type: 'Sensor', color: '#4393E9' },
-    { type: 'Actuator', color: '#F56C51' }
-  ];
-
-  const handleNodeClick = (nodeId) => {
-    if (deleteMode && selectedSVG === "PlatformModel") {
-      const newNodes = graph.nodes.filter(node => node.id !== nodeId);
-      const newEdges = graph.links.filter(edge => edge.start_node !== nodeId && edge.end_node !== nodeId);
-      setGraph({ nodes: newNodes, links: newEdges });
-    } else {
-      setHighlightedNode(node => {
-        if (node === nodeId) {
-          return null;
-        }
-        return nodeId;
-      });
-
-    }
-  };
-  function handleEdgeClick(edge) {
-    if (deleteMode && selectedSVG === "PlatformModel") {
-      setGraph(prevGraph => {
-        const newEdges = prevGraph.links.filter(e => !(e.start_node == edge.v && e.end_node == edge.w));
-        return { nodes: prevGraph.nodes, links: newEdges };
-      });
-    } else {
-      setHighlightedEdge(prev => {
-        if (prev?.start_node == edge.v && prev?.end_node == edge.w)
-          return null;
-        else
-          return { start_node: edge.v, end_node: edge.w };
-      });
-    }
-  }
-
 
   const calculateBoundaryPoint = (source, target) => {
     const deltaX = target.x - source.x;
     const deltaY = target.y - source.y;
-    const dist = Math.sqrt(deltaX * deltaX + deltaY * deltaY);
+    const dist = Math.sqrt(deltaX * deltaX + deltaY * deltaY) || 1;
 
-    // Adjust the boundary point calculation based on the node type
-    if (source.type === 'router' || target.type === 'router') {
-      // Handle square (router) geometry
+    if (source.shape === "router" || target.shape === "router") {
       const angle = Math.atan2(deltaY, deltaX);
-      const halfDiagonal = Math.sqrt(2 * (nodeRadius ** 2)); // Diagonal of a square for a router
-      const edgeDist = nodeRadius / Math.cos(Math.PI / 4 - Math.abs(angle % (Math.PI / 2) - Math.PI / 4));
+      const edgeDist =
+        nodeRadius /
+        Math.cos(Math.PI / 4 - Math.abs((angle % (Math.PI / 2)) - Math.PI / 4));
 
       return {
-        x: source.x + (edgeDist * Math.cos(angle)),
-        y: source.y + (edgeDist * Math.sin(angle))
+        x: source.x + edgeDist * Math.cos(angle),
+        y: source.y + edgeDist * Math.sin(angle),
       };
-    } else if (source.type === 'router' || target.type === 'router') {
-      // At least one node is a square
-      let rectSideLength = nodeRadius * 2; // Assuming square side length is twice the radius used for circles
-      let aspectRatio = Math.abs(deltaX / deltaY);
-      let halfWidth = rectSideLength / 2;
+    }
 
-      if (aspectRatio > 1) {
-        // Intersection is at the left or right side of the square
-        return {
-          x: source.x + (Math.sign(deltaX) * halfWidth),
-          y: source.y + (Math.sign(deltaX) * halfWidth / aspectRatio)
-        };
-      }
-    }
-    else {
-      // Handle circle (compute) geometry
-      return {
-        x: source.x + (nodeRadius * deltaX / dist),
-        y: source.y + (nodeRadius * deltaY / dist)
-      };
-    }
+    return {
+      x: source.x + (nodeRadius * deltaX) / dist,
+      y: source.y + (nodeRadius * deltaY) / dist,
+    };
   };
-
 
   useEffect(() => {
     const svg = d3.select(svgRef.current);
-    svg.selectAll("*").remove(); // Clear previous render
+    svg.selectAll("*").remove();
 
     if (!graph || !graph.nodes.length) {
-      return; // Exit if data is empty or improperly structured
+      return;
     }
-    // Top level group for zooming and panning
-    const svgGroup = svg.append('g');
 
-    // Create a new directed graph
-    var g = new dagre.graphlib.Graph();
-    g.setGraph({
-      rankdir: 'LR', // or 'LR' for horizontal layout
-      nodesep: 1, // Reduce distance between nodes
-      edgesep: 5, // Reduce distance between edges
-      ranksep: 10, // Reduce distance between different ranks
-      marginx: 2, // Increase margin if needed
-      marginy: 10
+    const svgGroup = svg.append("g");
+    const dagreGraph = new dagre.graphlib.Graph();
+
+    dagreGraph.setGraph({
+      rankdir: "LR",
+      nodesep: 10,
+      edgesep: 16,
+      ranksep: 20,
+      marginx: 16,
+      marginy: 16,
     });
-    g.setDefaultEdgeLabel(() => ({}));
+    dagreGraph.setDefaultEdgeLabel(() => ({}));
 
-    // Add nodes to the graph
-    graph.nodes.forEach(node => {
-      const width = node.type === 'router' ? 20 : 10; // Adjust width for routers to be larger
-      const height = node.type === 'router' ? 20 : 10; // Adjust height for routers
-      g.setNode(node.id, {
+    graph.nodes.forEach((node) => {
+      const size = node.type === "router" ? 24 : 20;
+      dagreGraph.setNode(node.id, {
         label: node.id,
-        width: width,
-        height: height,
-        shape: node.type  // Store the node type for later use
+        width: size,
+        height: size,
+        shape: node.type,
       });
     });
 
-    // Add edges to the graph
-    graph.links.forEach(edge => {
-      g.setEdge(edge.start_node, edge.end_node, {
-        width: 10, height: 10, label: edge.link_delay, curve: d3.curveBasis
+    graph.links.forEach((edge) => {
+      dagreGraph.setEdge(edge.start_node, edge.end_node, {
+        width: 10,
+        height: 10,
+        label: edge.link_delay,
       });
     });
 
-    // Layout the graph
-    dagre.layout(g);
-    svg.attr('viewBox', `0 0 ${g.graph().width} ${g.graph().height}`); // Adjust width and height based on Dagre output
+    dagre.layout(dagreGraph);
+    svg.attr(
+      "viewBox",
+      `0 0 ${dagreGraph.graph().width} ${dagreGraph.graph().height}`,
+    );
 
-    // Add zoom functionality
-    const zoom = d3.zoom()
-      .scaleExtent([1, 5 * graph.nodes.length])
-      .on('zoom', (event) => {
-        svgGroup.attr('transform', event.transform);
-      });
+    const zoom = d3.zoom().scaleExtent([0.7, Math.max(2, graph.nodes.length)]);
+    zoom.on("zoom", (event) => {
+      svgGroup.attr("transform", event.transform);
+    });
+    svg.call(zoom);
 
-    if (selectedSVG === "PlatformModel") {
-      svg.call(zoom); // Apply the zoom behavior only if selectedSVG is 'PlatformModel'
-    } else {
-      svg.on(".zoom", null); // Remove zoom behavior if not 'PlatformModel'
-    }
-
-
-    // Render nodes
-    const nodes = svgGroup.selectAll('.node')
-      .data(g.nodes().map(nodeId => g.node(nodeId)), d => d.label)
+    const nodes = svgGroup
+      .selectAll(".node")
+      .data(dagreGraph.nodes().map((nodeId) => dagreGraph.node(nodeId)), (d) => d.label)
       .enter()
-      .append('g')
-      .attr('class', 'node')
-      .attr('transform', d => `translate(${d.x},${d.y})`)
-      .on('click', function(event, d) {
-        handleNodeClick(d.label);
+      .append("g")
+      .attr("class", "node")
+      .attr("transform", (d) => `translate(${d.x},${d.y})`)
+      .on("click", (_event, d) => {
+        onNodeSelect?.(d.label);
       });
 
-    nodes.each(function(d) {
+    nodes.each(function eachNode(d) {
       const node = d3.select(this);
-      switch (d.shape) {
-        case 'compute':
-          node.append('circle')
-            .attr('r', nodeRadius)
-            .classed('compute', true)
-          break;
-        case 'router':
-          node.append('circle')
-            .attr('r', nodeRadius)
-            .classed('router', true)
-          break;
-        case 'sensor':
-          node.append('circle') // Using ellipse to r  epresent sensors
-            .attr('r', nodeRadius)
-            .classed('sensor', true)
-          break;
-        case 'actuator':
-          node.append('circle') // Using polygon to represent actuators
-            .attr('r', nodeRadius)
-            .classed('actuator', true)
-          break;
-      }
+      node
+        .append("circle")
+        .attr("r", nodeRadius)
+        .classed(d.shape, true)
+        .classed("highlighted-circle", highlightNode === d.label);
     });
 
-    nodes.append('text')
-      .attr('text-anchor', 'middle')
-      .attr('dy', '.35em') // Vertically center
+    nodes
+      .append("text")
+      .attr("text-anchor", "middle")
+      .attr("dy", ".35em")
       .style("font-size", "5px")
-      .style("fill", "white")
-      .text(d => d.label); // Assuming each node has a "name" property
+      .text((d) => d.label);
 
-    const edges = svgGroup.selectAll('.edge')
-      .data(g.edges())
+    const edges = svgGroup
+      .selectAll(".edge")
+      .data(dagreGraph.edges())
       .enter()
-      .append('g')
-      .attr('class', 'edge')
-      .on("click", function(event, d) {
-        handleEdgeClick(d); // centralizing click logic
+      .append("g")
+      .attr("class", "edge")
+      .on("click", (_event, d) => {
+        onEdgeSelect?.({ start_node: d.v, end_node: d.w });
       });
 
-    // Adding lines
-    edges.append('line')
-      .classed("highlighted-edge", d => { return highlightedEdge?.start_node == d.v && highlightedEdge?.end_node == d.w; })
+    edges
+      .append("line")
+      .classed(
+        "highlighted-edge",
+        (d) =>
+          highlightedEdge?.start_node === d.v &&
+          highlightedEdge?.end_node === d.w,
+      )
+      .attr("x1", (d) => calculateBoundaryPoint(dagreGraph.node(d.v), dagreGraph.node(d.w)).x)
+      .attr("y1", (d) => calculateBoundaryPoint(dagreGraph.node(d.v), dagreGraph.node(d.w)).y)
+      .attr("x2", (d) => calculateBoundaryPoint(dagreGraph.node(d.w), dagreGraph.node(d.v)).x)
+      .attr("y2", (d) => calculateBoundaryPoint(dagreGraph.node(d.w), dagreGraph.node(d.v)).y);
 
-      .attr('x1', d => calculateBoundaryPoint(g.node(d.v), g.node(d.w)).x)
-      .attr('y1', d => calculateBoundaryPoint(g.node(d.v), g.node(d.w)).y)
-      .attr('x2', d => calculateBoundaryPoint(g.node(d.w), g.node(d.v)).x)
-      .attr('y2', d => calculateBoundaryPoint(g.node(d.w), g.node(d.v)).y);
-
-    // Adding labels to the edges
-    edges.append('text')
-      .attr('x', d => {
-        const source = calculateBoundaryPoint(g.node(d.v), g.node(d.w));
-        const target = calculateBoundaryPoint(g.node(d.w), g.node(d.v));
+    edges
+      .append("text")
+      .attr("x", (d) => {
+        const source = calculateBoundaryPoint(dagreGraph.node(d.v), dagreGraph.node(d.w));
+        const target = calculateBoundaryPoint(dagreGraph.node(d.w), dagreGraph.node(d.v));
         return (source.x + target.x) / 2;
       })
-      .attr('y', d => {
-        const source = calculateBoundaryPoint(g.node(d.v), g.node(d.w));
-        const target = calculateBoundaryPoint(g.node(d.w), g.node(d.v));
+      .attr("y", (d) => {
+        const source = calculateBoundaryPoint(dagreGraph.node(d.v), dagreGraph.node(d.w));
+        const target = calculateBoundaryPoint(dagreGraph.node(d.w), dagreGraph.node(d.v));
         return (source.y + target.y) / 2;
       })
-      .text(d => g.edge(d).label)
-      .attr('font-size', '10px') // Adjust font size as necessary
-      .attr('text-anchor', 'middle')
-      .attr('dy', -4); // Adjust vertical offset to not overlap with the edge line
+      .text((d) => dagreGraph.edge(d).label)
+      .attr("font-size", "10px")
+      .attr("text-anchor", "middle")
+      .attr("dy", -4);
 
+    const legend = svg
+      .append("g")
+      .attr("class", "legend")
+      .attr(
+        "transform",
+        `translate(0, ${dagreGraph.graph().height - dagreGraph.graph().height / 18})`,
+      );
 
-    const legend = svg.append('g')
-      .attr('class', 'legend')
-      .attr('transform', `translate(${0}, ${g.graph().height - g.graph().height / 20})`);  // Adjust for your SVG size
-
-    legend.selectAll('.legend-item')
+    legend
+      .selectAll(".legend-item")
       .data(legendData)
       .enter()
-      .append('g')
-      .attr('class', 'legend-item')
-      .attr('transform', (d, i) => `translate(${i * g.graph().width / 4},0)`)  // Stacks items vertically, adjust spacing as needed
-      .each(function(d) {
+      .append("g")
+      .attr("class", "legend-item")
+      .attr(
+        "transform",
+        (_d, index) => `translate(${(index * dagreGraph.graph().width) / 4},0)`,
+      )
+      .each(function eachLegendItem(d) {
         const item = d3.select(this);
-        item.append('rect')  // Color block
-          .attr('width', g.graph().width / 40)
-          .attr('height', g.graph().height / 40)
-          .style('fill', d.color)
 
-        item.append('text')  // Text label
-          .attr('x', g.graph().width / 25)  // Offset text to the right of the rectangle
-          .attr('y', g.graph().height / 40)  // Vertical alignment
+        item
+          .append("rect")
+          .attr("width", dagreGraph.graph().width / 42)
+          .attr("height", dagreGraph.graph().height / 42)
+          .style("fill", d.color);
+
+        item
+          .append("text")
+          .attr("x", dagreGraph.graph().width / 25)
+          .attr("y", dagreGraph.graph().height / 42)
           .text(d.type)
           .style("text-anchor", "start")
-          .style("font-size", `${g.graph().width / 25}px`);  // Adjust font size as needed
+          .style("font-size", `${dagreGraph.graph().width / 26}px`);
       });
+  }, [graph, highlightNode, highlightedEdge, onNodeSelect, onEdgeSelect]);
 
-
-  }, [graph, deleteMode, highlightNode, highlightedEdge, selectedSVG]);
-
-  return (
-    <svg ref={svgRef} width="900" height="800" className={svgClass} >
-      {/* ... SVG content */}
-    </svg>
-  );
+  return <svg ref={svgRef} width="900" height="800"></svg>;
 };
 
 export default SVGPlatformModel;

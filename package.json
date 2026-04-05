@@ -16,8 +16,10 @@
     "@mui/material": "^5.15.18",
     "d3": "^7.9.0",
     "dagre": "^0.8.5",
+    "lucide-react": "^1.7.0",
     "react": "^18.2.0",
-    "react-dom": "^18.2.0"
+    "react-dom": "^18.2.0",
+    "react-resizable-panels": "^4.9.0"
   },
   "devDependencies": {
     "@types/react": "^18.2.66",
